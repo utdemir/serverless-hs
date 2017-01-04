@@ -1,4 +1,6 @@
+{-# LANGUAGE PolyKinds     #-}
 {-# LANGUAGE KindSignatures     #-}
+{-# LANGUAGE TypeInType     #-}
 {-# LANGUAGE DeriveGeneric     #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving     #-}
 {-# LANGUAGE DataKinds     #-}
@@ -66,8 +68,14 @@ data AWSResNameType
 newtype AWSRes
   (res :: AWSResType)
   (ty  :: AWSResNameType)
-  = AWSRes Text
+  = AWSRes { fromAWSRes :: Text }
   deriving (Show, Eq, Ord)
+
+data AWSStackResult
+  = AWSStackResult
+      { _awsStackId     :: AWSRes 'AWSStack  'AWSId
+      , _awsStackBucket :: AWSRes 'AWSBucket 'AWSId
+      }
 
 --------------------------------------------------------------------------------
 
@@ -82,7 +90,7 @@ instance FromJSON Config' where
 
 data Config
   = Config { configRegion :: Region
-           , configStackName :: AWSRes AWSStack AWSName
+           , configStackName :: AWSRes 'AWSStack 'AWSName
            }
   deriving (Show)
 

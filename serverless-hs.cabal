@@ -52,6 +52,7 @@ executable serverless-hs
                      , amazonka
                      , amazonka-core
                      , amazonka-cloudformation
+                     , amazonka-s3
                      , aeson-casing
                      , exceptions
                      , lens

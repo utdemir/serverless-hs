@@ -18,12 +18,12 @@ import           Data.FileEmbed
 import           Data.List                  (find)
 import           Data.List.Split            (splitOn)
 import           Data.Monoid
-import           Data.Text                  (Text)
 import qualified Data.Text                  as T
 import qualified Data.Text.Encoding         as T
 import qualified Data.Yaml                  as Yaml
 import           Network.AWS                as A
 import           Network.AWS.CloudFormation as A
+import           Network.AWS.S3 as S3
 import           Network.AWS.Waiter         as A
 import           Stratosphere               as S
 import           System.Directory           (doesFileExist)
@@ -50,7 +50,7 @@ mkHsMain fp = check >> (HsMain <$> liftIO (BS.readFile fp))
   where
     check = existence >> file
     existence = liftIO (doesFileExist fp) >>= \case
-      False -> throwM $ InvalidFile "File does not exist" ""
+      False -> throwM $ InvalidFile "File does not exist" (T.pack fp)
       True  -> return ()
     file = do
       ret <- liftIO $ splitOn ", " <$> readProcess "file" ["--brief", fp] ""
@@ -76,7 +76,7 @@ mkHsMain fp = check >> (HsMain <$> liftIO (BS.readFile fp))
 readConfig :: FilePath -> M Config
 readConfig path = do
   let rf = BS.readFile path
-  config' <- liftIO $ case takeExtension $ path of
+  config' <- liftIO $ case takeExtension path of
     ".json" -> Aeson.eitherDecodeStrict <$> rf
     ".yml"  -> Yaml.decodeEither        <$> rf
     ".yaml" -> Yaml.decodeEither        <$> rf
@@ -88,6 +88,9 @@ readConfig path = do
     Right cfg -> return cfg
 
 --------------------------------------------------------------------------------
+
+bucketIdOutputKey :: AWSRes 'AWSBucket 'AWSId
+bucketIdOutputKey = AWSRes "bucketId"
 
 serverlessHsTag :: A.Tag
 serverlessHsTag = A.tag & (A.tagKey   ?~ "serverless-hs")
@@ -132,6 +135,20 @@ awsCreateStack (AWSRes stackName) tpl = do
                                        ("Accept: " <> T.pack (show err))
   return $ AWSRes stackId
 
+awsDescribeStack :: AWSRes 'AWSStack 'AWSId -> M AWSStackResult
+awsDescribeStack sid@(AWSRes stackId) = do
+  stack' <- send $ describeStacks & dStackName ?~ stackId
+  bucketId <- case stack' ^. dsrsStacks of
+    [st] -> case find (( == Just (fromAWSRes bucketIdOutputKey)) . view oOutputKey)
+                      (st ^. sOutputs)
+                 >>= view oOutputValue of
+      Just xs -> return $ AWSRes xs
+      Nothing -> throwM $ AWSError "CloudFormation stack creation failed."
+                                   "Created stack does not have a bucket."
+    _ -> throwM $ AWSError "CloudFormation stack creation failed."
+                           "Unknown answer from CloudFront." 
+  return $ AWSStackResult sid bucketId
+  
 
 awsUpdateStack :: AWSRes 'AWSStack 'AWSId -> Template -> M ()
 awsUpdateStack (AWSRes stackId) tpl = do
@@ -147,9 +164,15 @@ awsUpdateStack (AWSRes stackId) tpl = do
                                        ("Accept: " <> T.pack (show err))
 
 awsUploadArchive :: AWSRes 'AWSBucket 'AWSId -> DeploymentZip -> M ()
-awsUploadArchive = undefined
-
-awsStackBucketId :: AWSRes 'AWSStack 'AWSId -> M (AWSRes 'AWSBucket 'AWSId)
-awsStackBucketId = undefined
-
+awsUploadArchive (AWSRes bucketId) (DeploymentZip contents) = do
+  pors <- send $ putObject
+                   (BucketName bucketId)
+                   (ObjectKey "deployment.zip")
+                   (toBody contents)
+  unless (pors ^. porsResponseStatus == 200) $
+    throwM $ AWSError "Upload failed."
+                      ("Status code: " <> T.pack (show $ pors ^. porsResponseStatus))  
+    
+  return ()
+  
 --------------------------------------------------------------------------------

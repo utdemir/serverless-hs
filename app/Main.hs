@@ -36,24 +36,12 @@ deploy Args{..} = runM $ do
     return (config, archive)
 
   step "Remote" $ do
-    sid' <- step "Checking for existing stack" $ do
-      r <- awsLookupStack configStackName
-      case r of
-        Just _  -> warn "Stack already exists, this will overwrite old stack."
-        Nothing -> info "No stack found, will create a fresh one."
-      return r
+    stack <- step "Creating an initial stack" $
+      awsCreateStack configStackName undefined
+      >>= awsDescribeStack
 
-    sid <- case sid' of
-      Just i  ->
-        step "Updating stack" $
-          awsUpdateStack i undefined $> i
-      Nothing ->
-        step "Creating an initial stack" $
-          awsCreateStack configStackName undefined
-
-    step "Uploading deployment archive" $ do
-      bid <- awsStackBucketId sid
-      awsUploadArchive bid archive
+    step "Uploading deployment archive" $
+      awsUploadArchive (_awsStackBucket stack) archive
 
     step "Checking the executable" $ return ()
 
