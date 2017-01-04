@@ -15,8 +15,10 @@ cabal-version:       >=1.10
 
 library
   hs-source-dirs:      src
-  exposed-modules:     Lib
-                     , Types
+  exposed-modules:     Web.Serverless
+  other-modules:       Web.Serverless.Handler
+                     , Web.Serverless.Types
+                     , Web.Serverless.Types.Args
   build-depends:       aeson
                      , async
                      , base >= 4.7 && < 5
@@ -27,9 +29,9 @@ library
                      , safe-exceptions
                      , attoparsec
                      , aeson-casing
-                     , lens
-                     , pipes
-                     , pipes-parse
+                     , system-filepath
+                     , optparse-generic
+                     , text
   default-language:    Haskell2010
 
 executable serverless-hs
@@ -39,16 +41,29 @@ executable serverless-hs
 --                       -static -optl-static -optl-pthread -fPIC
   build-depends:       base
                      , serverless-hs
+                     , zip-archive
+                     , file-embed
+                     , text
+                     , directory
+                     , process
+                     , split
+                     , stratosphere
+                     , yaml
                      , amazonka
-  default-language:    Haskell2010
-
-test-suite serverless-hs-test
-  type:                exitcode-stdio-1.0
-  hs-source-dirs:      test
-  main-is:             Spec.hs
-  build-depends:       base
-                     , serverless-hs
-  ghc-options:         -threaded -rtsopts -with-rtsopts=-N
+                     , amazonka-core
+                     , amazonka-cloudformation
+                     , aeson-casing
+                     , exceptions
+                     , lens
+                     , ansi-terminal
+                     , resourcet
+                     , transformers
+                     , filepath
+                     , bytestring
+                     , system-filepath
+                     , optparse-generic
+                     , aeson
+                     , safe-exceptions
   default-language:    Haskell2010
 
 source-repository head

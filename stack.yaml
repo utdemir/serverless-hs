@@ -1,15 +1,14 @@
-resolver: lts-7.12
+resolver: nightly-2016-12-30
+# resolver: lts-7.14
+
 packages:
 - '.'
 
 extra-deps:
 - chan-split-0.5.0
-- pipes-async-0.1.1
-
-allow-newer: true
 
 flags: {}
 
-# docker:
-#  enable: true
-# image: "c2fd6ab4c14b"
+docker:
+  enable: false
+  image: "fpco/stack-build"

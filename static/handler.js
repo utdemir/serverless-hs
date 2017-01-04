@@ -1,23 +1,28 @@
 // @flow
 
+"use strict";
+
 const spawn = require("child_process").spawn;
 const fs = require("fs");
 const readline = require("readline");
+const EventEmitter = require('events');
 
 /*::
 type Callback<T> = T => void
 type Ask = (Object, Callback<Object>) => void
 */
 
+class ErrorEmitter extends EventEmitter {}
+const errorEmitter = new EventEmitter
+
 function throw_(msg/*: string */)/*: void */ {
-  console.log("!!!!", msg);
-  throw Error(msg);
+  errorEmitter.emit("error", msg)
 };
 
 function trace/*::<T>*/(val/*: T*/)/*: T*/ {
   return val;
 }
- 
+
 function mkTemp(prefix)/*: string*/ {
   const randName = Math.floor(Math.random() * 1000000);
   return `/tmp/${prefix}-${randName}`
@@ -79,16 +84,16 @@ function spawnBackend(callback /*: Callback<Ask> */) {
     mkFifo(outputFilename => {
       mkWriter(inputFilename, write => {
         console.log(`spawn(hs-main, [${inputFilename}, ${outputFilename}])`);
-        const proc = spawn(
-          "./hs-main", [inputFilename, outputFilename],
-          { stdio: "inherit"}
-        );
+        const proc = spawn("./hs-main", [inputFilename, outputFilename]);
         proc.on("error", err  => throw_("error when spawning child: " + err));
         proc.on("exit",  code => throw_("child exited with code: " + code));
-
+        proc.stdout.on('data', (data) => { console.log(`hs-main stdout: ${data}`); });
+        proc.stderr.on('data', (data) => { console.log(`hs-main stderr: ${data}`); });
+    
         const table/*: { [key: number]: Object => void } */ = {};
         var lastUid = 0;
 
+        console.log("Setting callback.")
         callback((payload, cb) => {
           lastUid = lastUid + 1;
 
@@ -111,28 +116,46 @@ function spawnBackend(callback /*: Callback<Ask> */) {
 /******************************************************************************/
 
 var ask/*: Ask */ = (payload, cb) => {
-  console.log("Backend not initialized, retrying...");
+  console.log("Callback not ready, retrying...");
   setTimeout(ask, 10, payload, cb);
 };
 
 spawnBackend(cb => {
-  console.log("Backend initialized");
+  console.log("I will accept events now.");
   ask = cb;
 });
 
 /******************************************************************************/
 
+var lastError/*: ?string */ = null;
+errorEmitter.on("error", err => {
+  console.error("!!!!! GOT ERROR !!!!!");
+  console.error(err);
+  lastError = "" + err;
+});
+
+process.on('uncaughtException', err => errorEmitter.emit(err, ""+err))
+
+/******************************************************************************/
+
 exports.handler = function( event/*: Object */, context/*: Object*/
-                            , callback/*: (?Object, ?Object) => void */) {
+                            , callback/*: (?any, ?Object) => void */) {
   context.callbackWaitsForEmptyEventLoop = false;
   const payload = {
     payload: event,
     context: context
   };
-  ask(payload, answer =>
-    answer.tag == "Success"
-      ? callback(null, answer.contents)
-      : callback(answer)
-  );
+
+  if(lastError != null)
+    callback(lastError, null)
+  else {  
+    errorEmitter.on("error", err => callback(err))
+      
+    ask(payload, answer =>
+      answer.tag == "Success"
+        ? callback(null, answer.contents)
+        : callback(answer)
+    );
+  }
 };
 
