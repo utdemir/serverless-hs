@@ -12,4 +12,4 @@ flags: {}
 
 docker:
   enable: false
-  image: "fpco/stack-build"
+  image: "lambci/lambda:build"
