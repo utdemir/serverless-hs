@@ -1,19 +1,13 @@
-default: dist/deployment.zip
-
 dirs:
-	mkdir -p tmp/ dist/
+	mkdir -p tmp/
 	rm -rf tmp/*
-	rm -rf dist/*
 
-dist/hs-main: dirs
-ifndef EXECUTABLE
-	$(error EXECUTABLE is undefined)
-endif
-	stack install $(EXECUTABLE) --local-bin-path tmp/
-	mv tmp/$(EXECUTABLE) dist/hs-main
+dist/simple: dirs
+	stack install --docker simple --local-bin-path tmp/
 
-dist/handler.js: dirs
-	cp handler.js dist/handler.js
+dist/serverless-hs: 
+	stack install serverless-hs --local-bin-path tmp/
 
-dist/deployment.zip: dist/hs-main dist/handler.js
-	zip -j dist/deployment.zip dist/hs-main dist/handler.js
+upload: dist/simple dist/serverless-hs
+	tmp/serverless-hs tmp/smpl test.yaml 
+

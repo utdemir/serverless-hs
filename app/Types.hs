@@ -74,14 +74,14 @@ newtype AWSRes
 data AWSStackResult
   = AWSStackResult
       { _awsStackId     :: AWSRes 'AWSStack  'AWSId
-      , _awsStackBucket :: AWSRes 'AWSBucket 'AWSId
       }
 
 --------------------------------------------------------------------------------
 
 data Config'
-  = Config' { config'Region    :: Maybe Region
-            , config'StackName :: Text
+  = Config' { config'Region     :: Maybe Region
+            , config'StackName  :: Text
+            , config'BucketName :: Text
             }
   deriving (Show, Generic)
 
@@ -89,8 +89,9 @@ instance FromJSON Config' where
    parseJSON = genericParseJSON aesonSettings
 
 data Config
-  = Config { configRegion :: Region
-           , configStackName :: AWSRes 'AWSStack 'AWSName
+  = Config { configRegion     :: Region
+           , configStackName  :: AWSRes 'AWSStack  'AWSName
+           , configBucketName :: AWSRes 'AWSBucket 'AWSName
            }
   deriving (Show)
 
@@ -98,6 +99,7 @@ config'ToConfig :: Config' -> Config
 config'ToConfig Config'{..}
   = Config (fromMaybe NorthVirginia config'Region)
            (AWSRes config'StackName)
+           (AWSRes config'BucketName)
 
 instance FromJSON Config where
   parseJSON = fmap config'ToConfig . parseJSON

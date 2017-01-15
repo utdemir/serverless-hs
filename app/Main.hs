@@ -5,7 +5,9 @@
 module Main where
 
 --------------------------------------------------------------------------------
+import Data.Monoid ((<>))
 import           Control.Exception.Safe
+import Control.Monad.IO.Class
 import           Data.Functor           (($>))
 import           Options.Generic
 import           System.Exit
@@ -31,17 +33,22 @@ deploy Args{..} = runM $ do
       hsMain <- step "Reading executable" $
         mkHsMain executablePath
       return (config, hsMain)
-    archive <- step "Creating deployment package" $
-      return $ deploymentZip handlerJS hsMain
+    archive <- step "Creating deployment package" $ do
+      let a = deploymentZip handlerJS hsMain
+      info $! "Deployment archive size: " <> deploymentZipSize a
+      return a
     return (config, archive)
 
-  step "Remote" $ do
-    stack <- step "Creating an initial stack" $
-      awsCreateStack configStackName undefined
-      >>= awsDescribeStack
+  saveDeploymentZip "test/deployment.zip" archive
+  _ <- liftIO exitSuccess
 
+  step "Remote" $ do
     step "Uploading deployment archive" $
-      awsUploadArchive (_awsStackBucket stack) archive
+      awsUploadArchive configBucketName archive
+
+    stack <- step "Creating an initial stack" $
+      awsCreateStack configStackName (initialTemplate configBucketName)
+      >>= awsDescribeStack
 
     step "Checking the executable" $ return ()
 

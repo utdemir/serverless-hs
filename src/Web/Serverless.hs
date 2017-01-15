@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module Web.Serverless
   ( LambdaFunction (LambdaFunction)
@@ -9,13 +10,15 @@ module Web.Serverless
 
 --------------------------------------------------------------------------------
 import Options.Generic
+import Data.Void
 --------------------------------------------------------------------------------
 import Web.Serverless.Types
 import Web.Serverless.Handler
 --------------------------------------------------------------------------------
 
-serverlessMain :: LambdaFunction payload err m ret -> IO ()
+serverlessMain :: LambdaFunction payload err IO ret -> IO ()
 serverlessMain fun = do
-  x <- getRecord "Serverless Haskell"
-  print (x :: Args)
+  Args{..} <- getRecord "Serverless Haskell"
+  absurd <$> server fun argsPort
+  
 

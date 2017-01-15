@@ -8,15 +8,11 @@ module Web.Serverless.Types.Args
   ) where
 
 --------------------------------------------------------------------------------
-import qualified Filesystem.Path.CurrentOS as F
-import           Prelude
---------------------------------------------------------------------------------
 import           Options.Generic
 --------------------------------------------------------------------------------
 
 data CLI
-  = CLI (F.FilePath <?> "File to read events")
-        (F.FilePath <?> "File to write answers")
+  = CLI (Int <?> "Port to listen on")
   deriving (Show, Generic)
 
 instance ParseRecord CLI
@@ -24,8 +20,7 @@ instance ParseRecord CLI
 --------------------------------------------------------------------------------
 
 data Args
-  = Args { inputFilename  :: FilePath
-         , outputFilename :: FilePath
+  = Args { argsPort  :: Int
          }
   deriving Show
 
@@ -33,6 +28,6 @@ instance ParseRecord Args where
   parseRecord = toArgs <$> parseRecord
     where
       toArgs :: CLI -> Args
-      toArgs (CLI (Helpful i) (Helpful o))
-        = Args (F.encodeString i) (F.encodeString o)
+      toArgs (CLI (Helpful i))
+        = Args i
 

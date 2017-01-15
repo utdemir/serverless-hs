@@ -1,15 +1,14 @@
-resolver: nightly-2016-12-30
-# resolver: lts-7.14
+resolver: nightly-2017-01-10
 
 packages:
 - '.'
 - examples/
 
-extra-deps:
-- chan-split-0.5.0
-
 flags: {}
 
+install-ghc: true
 docker:
   enable: false
-  image: "lambci/lambda:build"
+#  image: "lambci/lambda:build"
+  image: "fpco/stack-build:latest"
+  set-user: false
