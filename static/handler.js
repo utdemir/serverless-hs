@@ -7,11 +7,7 @@ const http = require("http");
 
 /******************************************************************************/
 
-const port = 2233
-
-/******************************************************************************/
-
-function spawnBackend(port/*: Number*/, succ/*: () => void*/, err/*: string => void*/) {
+function spawnBackend(port/*: number*/, succ/*: () => void*/, err/*: string => void*/) {
   const proc = spawn("./hs-main", [port.toString()], {});
   proc.on("error", err  => err("error when spawning child: " + err));
   proc.on("exit",  code => err("child exited with code: " + code));
@@ -63,29 +59,41 @@ process.on('uncaughtException', setError)
 
 /******************************************************************************/
 
+const port = 2233
+
+/******************************************************************************/
 var backendReady = false;
 function waitForBackendOrError(cb /*: ?string => void */) {
   if(lastError != null) {
     cb(lastError)
-  }
-  else {
-    
+  } else {
+    if(backendReady) {
+      cb(null)
+    } else {
+      setInterval(waitForBackendOrError, 50, cb)
+    }
   }
 }
 
+spawnBackend(
+  port,
+  (() => { backendReady = true; }),
+  setError
+);
+
 /******************************************************************************/
 
-exports.handler = function( event/*: Object */, context/*: Object*/
-                            , callback/*: (?any, ?Object) => void */) {
+exports.handler = function(event/*: Object */, context/*: Object*/
+                          , callback/*: (?any, ?Object) => void */) {
   context.callbackWaitsForEmptyEventLoop = false;
   const payload = {
     payload: event,
     context: context
   };
 
-  if(lastError != null)
+  if(lastError != null) {
     callback(lastError, null)
-  else {  
+  } else {  
     ask(payload, answer =>
       answer.tag == "Success"
         ? callback(null, answer.contents)
