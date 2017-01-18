@@ -42,6 +42,7 @@ function spawnBackend(port/*: number*/, succ/*: () => void*/, err/*: string => v
           succ()
         }
       });
+      req.end()
     }
   }
 
@@ -66,12 +67,10 @@ var backendReady = false;
 function waitForBackendOrError(cb /*: ?string => void */) {
   if(lastError != null) {
     cb(lastError)
+  } else if(backendReady) {
+    cb(null)
   } else {
-    if(backendReady) {
-      cb(null)
-    } else {
-      setInterval(waitForBackendOrError, 50, cb)
-    }
+    setTimeout(waitForBackendOrError, 50, cb)
   }
 }
 
@@ -84,21 +83,37 @@ spawnBackend(
 /******************************************************************************/
 
 exports.handler = function(event/*: Object */, context/*: Object*/
-                          , callback/*: (?any, ?Object) => void */) {
+                           , callback/*: (?any, ?Object) => void */) {
   context.callbackWaitsForEmptyEventLoop = false;
   const payload = {
     payload: event,
     context: context
   };
 
-  if(lastError != null) {
-    callback(lastError, null)
-  } else {  
-    ask(payload, answer =>
-      answer.tag == "Success"
-        ? callback(null, answer.contents)
-        : callback(answer)
-    );
-  }
+  waitForBackendOrError(error => {
+    if(error != null)
+      callback(error)
+    else {
+      const req = http.request({
+        host: "127.0.0.1",
+        port: port,
+        path: "/function",
+        method: "POST",
+        timeout: 500,
+      });
+      req.write(JSON.stringify(payload))
+      req.on("response", response => {
+        var res = '';
+        response.on("data", chunk => {
+          res += chunk
+        })
+        response.on("end", ret => {
+          const parsed = JSON.parse(res)
+          console.log(parsed)
+        })
+      })
+      req.end()
+    }
+  })
 };
 
