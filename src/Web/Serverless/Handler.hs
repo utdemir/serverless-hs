@@ -22,11 +22,18 @@ import Network.HTTP.Types
 import           Web.Serverless.Types
 --------------------------------------------------------------------------------
 
-data Answer err ret
-  = Success ret
-  | Fail err
+data FailType err
+  = Fail err
   | GotException String
   | DecodeError String
+  deriving Generic
+
+instance ToJSON err => ToJSON (FailType err) where
+  toJSON = genericToJSON aesonSettings
+
+data Answer err ret
+  = Success ret
+  | Failure (FailType err)
   deriving Generic
 
 instance (ToJSON err, ToJSON ret) => ToJSON (Answer err ret) where
@@ -74,10 +81,10 @@ applyJSON :: LambdaFunction payload err IO ret
           -> IO (Answer err ret)
 applyJSON (LambdaFunction f) val =
   case eitherDecode val of
-    Left err -> return $ DecodeError err
+    Left err -> return $ Failure (DecodeError err)
     Right xs -> tryAnyDeep (f xs) >>= \case
-      Left ex -> return . GotException $ show (ex :: SomeException)
-      Right (Left err)  -> return $ Fail err
+      Left ex -> return . Failure . GotException $ show (ex :: SomeException)
+      Right (Left err)  -> return . Failure $ Fail err
       Right (Right ret) -> return $ Success ret
 
 --------------------------------------------------------------------------------

@@ -9,7 +9,7 @@ const http = require("http");
 
 function spawnBackend(port/*: number*/, succ/*: () => void*/, err/*: string => void*/) {
   const proc = spawn("./hs-main", [port.toString()], {});
-  proc.on("error", err  => err("error when spawning child: " + err));
+  proc.on("error", err_ => err("error when spawning child: " + err_));
   proc.on("exit",  code => err("child exited with code: " + code));
   proc.stdout.on('data', data => { console.log(`hs-main stdout: ${data}`); });
   proc.stderr.on('data', data => { console.log(`hs-main stderr: ${data}`); });
@@ -53,7 +53,8 @@ function spawnBackend(port/*: number*/, succ/*: () => void*/, err/*: string => v
 
 var lastError/*: ?string */ = null;
 function setError(msg/*: string */) {
-  lastError = ""+msg;
+  console.error("Got error: " + msg)
+  lastError = "" + msg;
 }
 
 process.on('uncaughtException', setError)
@@ -63,6 +64,7 @@ process.on('uncaughtException', setError)
 const port = 2233
 
 /******************************************************************************/
+
 var backendReady = false;
 function waitForBackendOrError(cb /*: ?string => void */) {
   if(lastError != null) {
@@ -76,11 +78,30 @@ function waitForBackendOrError(cb /*: ?string => void */) {
 
 spawnBackend(
   port,
-  (() => { backendReady = true; }),
+  () => { backendReady = true; },
   setError
 );
 
 /******************************************************************************/
+
+/*::
+type Success = { tag: "Success", contents: Object }
+type Failure = { tag: "Failure", contents: { tag: String, contents: Object } }
+type Answer = Success | Failure
+*/
+
+function jsonToAnswer(json/*: string*/)/*: ?Answer */ {
+  var ret/*: ?Object */ = null
+  try {
+    ret = JSON.parse(json)
+  } catch(ex) {
+    console.log("Error parsing json: " + json)
+  }
+  return ret
+}
+
+/******************************************************************************/
+
 
 exports.handler = function(event/*: Object */, context/*: Object*/
                            , callback/*: (?any, ?Object) => void */) {
@@ -103,13 +124,23 @@ exports.handler = function(event/*: Object */, context/*: Object*/
       });
       req.write(JSON.stringify(payload))
       req.on("response", response => {
-        var res = '';
+        var res = "";
         response.on("data", chunk => {
           res += chunk
         })
         response.on("end", ret => {
-          const parsed = JSON.parse(res)
-          console.log(parsed)
+          const parsed = jsonToAnswer(res)
+          if(parsed == null) {
+            callback("Error decoding json", null)
+          } else {
+            if(parsed.tag == "Success") {
+              callback(null, parsed.contents)
+            } else if(parsed.tag == "Failure") {
+              callback(parsed.contents)
+            } else {
+              callback(parsed)
+            }            
+          }
         })
       })
       req.end()

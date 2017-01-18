@@ -16,7 +16,7 @@ cabal-version:       >=1.10
 executable simple
   main-is:             Simple.hs
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N
---                       -static -optl-static -optl-pthread -fPIC
+                       -static -optl-static -optl-pthread -fPIC
   build-depends:       base
                      , serverless-hs
                      , aeson
