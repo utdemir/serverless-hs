@@ -22,6 +22,7 @@ import           Data.Aeson.TH
 import           Data.Monoid
 import           Data.Text              (Text)
 import qualified Data.Text              as T
+import qualified Data.Text.Lazy              as TL
 import           GHC.Generics
 import qualified Data.ByteString as BS
 import           Network.AWS
@@ -30,6 +31,7 @@ import           Control.Monad.Trans.Monologue
 import Data.Maybe
 import Control.Monad.IO.Class
 import           Control.Monad.Trans.Resource
+import qualified Dhall
 --------------------------------------------------------------------------------
 import           Types.Args
 --------------------------------------------------------------------------------
@@ -80,13 +82,13 @@ data AWSStackResult
 
 data Config'
   = Config' { config'Region     :: Maybe Region
-            , config'StackName  :: Text
-            , config'BucketName :: Text
+            , config'StackName  :: TL.Text
+            , config'BucketName :: TL.Text
             }
   deriving (Show, Generic)
 
-instance FromJSON Config' where
-   parseJSON = genericParseJSON aesonSettings
+instance Dhall.Interpret Region
+instance Dhall.Interpret Config'
 
 data Config
   = Config { configRegion     :: Region
@@ -98,11 +100,11 @@ data Config
 config'ToConfig :: Config' -> Config
 config'ToConfig Config'{..}
   = Config (fromMaybe NorthVirginia config'Region)
-           (AWSRes config'StackName)
-           (AWSRes config'BucketName)
+           (AWSRes . TL.toStrict $ config'StackName)
+           (AWSRes . TL.toStrict $ config'BucketName)
 
-instance FromJSON Config where
-  parseJSON = fmap config'ToConfig . parseJSON
+instance Dhall.Interpret Config where
+  auto = config'ToConfig <$> Dhall.auto
 
 --------------------------------------------------------------------------------
 

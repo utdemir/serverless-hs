@@ -11,7 +11,9 @@ module Deploy where
 import Numeric
 import           Codec.Archive.Zip
 import           Control.Lens
+import qualified Data.Text.Lazy as TL
 import           Control.Monad
+import qualified Dhall
 import           Control.Monad.Catch
 import           Control.Monad.IO.Class
 import qualified Data.Aeson                 as Aeson
@@ -23,7 +25,6 @@ import           Data.List.Split            (splitOn)
 import           Data.Monoid
 import qualified Data.Text                  as T
 import qualified Data.Text.Encoding         as T
-import qualified Data.Yaml                  as Yaml
 import           Network.AWS                as A
 import           Network.AWS.CloudFormation as A
 import           Network.AWS.S3 as S3
@@ -91,17 +92,21 @@ mkHsMain fp = check >> (HsMain <$> liftIO (BS.readFile fp))
 
 readConfig :: FilePath -> M Config
 readConfig path = do
-  let rf = BS.readFile path
-  config' <- liftIO $ case takeExtension path of
-    ".json" -> Aeson.eitherDecodeStrict <$> rf
-    ".yml"  -> Yaml.decodeEither        <$> rf
-    ".yaml" -> Yaml.decodeEither        <$> rf
-    _       -> throwM $ InvalidFile
-                          path
-                          "Expected extensions: .json, .yaml or .yml"
-  case config' of
-    Left err  -> throwM $ InvalidFile path (T.pack err)
-    Right cfg -> return cfg
+  liftIO (try $ Dhall.input Dhall.auto $ TL.pack path) >>= \case
+    Left ex -> throwM $ InvalidFile path (T.pack $ show (ex :: SomeException))
+    Right x -> return x
+--  case ret of
+--    
+--  config' <- liftIO $ case takeExtension path of
+--    ".json" -> Aeson.eitherDecodeStrict <$> rf
+--    ".yml"  -> Yaml.decodeEither        <$> rf
+--    ".yaml" -> Yaml.decodeEither        <$> rf
+--    _       -> throwM $ InvalidFile
+--                          path
+--                          "Expected extensions: .json, .yaml or .yml"
+--  case config' of
+--    Left err  -> throwM $ InvalidFile path (T.pack err)
+--    Right cfg -> return cfg
 
 --------------------------------------------------------------------------------
 

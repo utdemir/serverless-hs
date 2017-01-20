@@ -49,7 +49,7 @@ executable serverless-hs
                      , process
                      , split
                      , stratosphere
-                     , yaml
+                     , dhall
                      , amazonka
                      , amazonka-core
                      , amazonka-cloudformation
