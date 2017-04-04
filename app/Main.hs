@@ -1,17 +1,24 @@
 {-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards   #-}
+{-# LANGUAGE OverloadedLists   #-}
 
 module Main where
 
 --------------------------------------------------------------------------------
-import Data.Monoid ((<>))
 import           Control.Exception.Safe
-import Control.Monad.IO.Class
-import           Data.Functor           (($>))
+import Control.Lens
+import           Control.Monad.IO.Class
+import Data.Aeson
+import           Data.Monoid            ((<>))
+import           Data.Time.Clock
 import           Options.Generic
 import           System.Exit
+import qualified Stratosphere as S
+import qualified Data.ByteString.Lazy as BL
 --------------------------------------------------------------------------------
+import qualified Web.Serverless.Internal.Constants as C
+import Web.Serverless.Internal.Handler
 import           Deploy
 import           Types
 --------------------------------------------------------------------------------
@@ -39,17 +46,37 @@ deploy Args{..} = runM $ do
       return a
     return (config, archive)
 
-  saveDeploymentZip "test/deployment.zip" archive
-  _ <- liftIO exitSuccess
-
   step "Remote" $ do
-    step "Uploading deployment archive" $
-      awsUploadArchive configBucketName archive
+    archiveName <- step "Uploading deployment archive" $ do
+      now <- liftIO getCurrentTime
+      let archiveName = mkArchiveName configStackName now archive
+      awsUploadObject configBucketName archiveName (unDeploymentZip archive)
+      return archiveName
 
-    stack <- step "Creating an initial stack" $
-      awsCreateStack configStackName (initialTemplate configBucketName)
-      >>= awsDescribeStack
+    (sid, fid) <- step "Creating an initial stack" $ do
+      sid <- awsCreateStack configStackName (configBucketName, archiveName) initialTemplate
+      stack <- awsDescribeStack sid
+      case "meta" `lookup` _awsStackResources stack of
+        Just x -> return $ (sid, AWSRes x)
+        Nothing -> error "foo"
 
-    step "Checking the executable" $ return ()
+    descr <- step "Generating deployment description" $ do
+      obj <- awsInvokeFunction fid mempty
+      case decodeValue $ Object obj of
+        Left err -> error err
+        Right desc -> return (desc :: S.Resources)
+        
+
+    step "Deploying" $ do
+      let template = S.template descr
+            & S.parameters ?~ [ S.parameter C.parameterS3Bucket "String"
+                              , S.parameter C.parameterS3Key "String"
+                              ]
+
+      awsUpdateStack sid (configBucketName, archiveName) template
+      
+    liftIO $ print descr
+
+    return ()
 
   return ()

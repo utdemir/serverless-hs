@@ -22,7 +22,6 @@ import           Data.Aeson.TH
 import           Data.Monoid
 import           Data.Text              (Text)
 import qualified Data.Text              as T
-import qualified Data.Text.Lazy              as TL
 import           GHC.Generics
 import qualified Data.ByteString as BS
 import           Network.AWS
@@ -31,7 +30,6 @@ import           Control.Monad.Trans.Monologue
 import Data.Maybe
 import Control.Monad.IO.Class
 import           Control.Monad.Trans.Resource
-import qualified Dhall
 --------------------------------------------------------------------------------
 import           Types.Args
 --------------------------------------------------------------------------------
@@ -57,12 +55,12 @@ runM (M m) = do
 
 newtype HandlerJS     = HandlerJS     BS.ByteString
 newtype HsMain        = HsMain        BS.ByteString
-newtype DeploymentZip = DeploymentZip BS.ByteString
+newtype DeploymentZip = DeploymentZip { unDeploymentZip :: BS.ByteString }
 
 --------------------------------------------------------------------------------
 
 data AWSResType
-  = AWSBucket | AWSStack
+  = AWSBucket | AWSStack | AWSLambdaFunction
 
 data AWSResNameType
   = AWSName | AWSId
@@ -75,20 +73,22 @@ newtype AWSRes
 
 data AWSStackResult
   = AWSStackResult
-      { _awsStackId     :: AWSRes 'AWSStack  'AWSId
+      { _awsStackId        :: AWSRes 'AWSStack  'AWSId
+      , _awsStackResources :: [(T.Text, T.Text)]
       }
 
+  
 --------------------------------------------------------------------------------
 
 data Config'
   = Config' { config'Region     :: Maybe Region
-            , config'StackName  :: TL.Text
-            , config'BucketName :: TL.Text
+            , config'StackName  :: T.Text
+            , config'BucketName :: T.Text
             }
   deriving (Show, Generic)
 
-instance Dhall.Interpret Region
-instance Dhall.Interpret Config'
+instance FromJSON Config' where
+   parseJSON = genericParseJSON aesonSettings
 
 data Config
   = Config { configRegion     :: Region
@@ -100,11 +100,11 @@ data Config
 config'ToConfig :: Config' -> Config
 config'ToConfig Config'{..}
   = Config (fromMaybe NorthVirginia config'Region)
-           (AWSRes . TL.toStrict $ config'StackName)
-           (AWSRes . TL.toStrict $ config'BucketName)
+           (AWSRes config'StackName)
+           (AWSRes config'BucketName)
 
-instance Dhall.Interpret Config where
-  auto = config'ToConfig <$> Dhall.auto
+instance FromJSON Config where
+  parseJSON = fmap config'ToConfig . parseJSON
 
 --------------------------------------------------------------------------------
 
@@ -118,4 +118,5 @@ instance Exception DeployException where
     = T.unpack $ "Error reading " <> T.pack fpath <> ": " <> desc
   displayException (AWSError hdr desc)
     = T.unpack $ hdr <> ": " <> desc
+
 

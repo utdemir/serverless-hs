@@ -3,29 +3,26 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE LambdaCase       #-}
 
-module Web.Serverless.Handler where
+module Web.Serverless.Internal.Handler where
 
 --------------------------------------------------------------------------------
 import           Control.Exception.Safe
-
+import Data.Void
 import           Data.Aeson                    hiding (Success)
 import           Data.Aeson.Internal           (IResult (..), ifromJSON)
 import qualified Data.ByteString               as BS
 import qualified Data.ByteString.Lazy          as BL
 import           Data.Functor
-import           Data.Void
 import           GHC.Generics
-import Network.Wai
-import Network.Wai.Handler.Warp
-import Network.HTTP.Types
+import           Network.HTTP.Types
 --------------------------------------------------------------------------------
-import           Web.Serverless.Types
+import Web.Serverless.Internal.SocketApp
+import           Web.Serverless.Internal.Types
 --------------------------------------------------------------------------------
 
 data FailType err
   = Fail err
   | GotException String
-  | DecodeError String
   deriving Generic
 
 instance ToJSON err => ToJSON (FailType err) where
@@ -57,35 +54,12 @@ instance (ToJSON err, ToJSON ret) => ToJSON (Out err ret) where
 
 --------------------------------------------------------------------------------
 
-server :: LambdaFunction payload err IO ret -> Int -> IO Void
-server fun port
-  = run port (application fun)
-      >> error "invariant violation: warp terminated"
-  
-
-application :: LambdaFunction payload err IO ret -> Application
-application fun@(LambdaFunction _) req resp
-  = lazyRequestBody req
-      >>= applyJSON fun
-      >>= resp . responseLBS status200 [] . encode
-
---------------------------------------------------------------------------------
-
-apply :: LambdaFunction payload err m ret -> Event payload -> m (Either err ret)
-apply (LambdaFunction f) ev = f ev
-
---------------------------------------------------------------------------------
-
-applyJSON :: LambdaFunction payload err IO ret
-          -> BL.ByteString
-          -> IO (Answer err ret)
-applyJSON (LambdaFunction f) val =
-  case eitherDecode val of
-    Left err -> return $ Failure (DecodeError err)
-    Right xs -> tryAnyDeep (f xs) >>= \case
-      Left ex -> return . Failure . GotException $ show (ex :: SomeException)
-      Right (Left err)  -> return . Failure $ Fail err
-      Right (Right ret) -> return $ Success ret
+run :: Int -> LambdaFunction payload err ret -> IO Void
+run port (LambdaFunction fun) = runSocketApp port $ \val ->
+  try (fun $ Event val (Context ())) >>= \case
+    Left ex -> return . Failure . GotException $ show (ex :: SomeException)
+    Right (Left err)  -> return . Failure $ Fail err
+    Right (Right ret) -> return $ Success ret
 
 --------------------------------------------------------------------------------
 

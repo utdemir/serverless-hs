@@ -1,3 +1,0 @@
-region: us-east-1
-stack_name: serverless-hs
-bucket_name: serverlesshs

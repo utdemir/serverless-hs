@@ -1,41 +1,47 @@
+{-# LANGUAGE BinaryLiterals    #-}
 {-# LANGUAGE DataKinds         #-}
-{-# LANGUAGE BinaryLiterals         #-}
-{-# LANGUAGE OverloadedLists         #-}
 {-# LANGUAGE LambdaCase        #-}
+{-# LANGUAGE OverloadedLists   #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell   #-}
 
 module Deploy where
 
 --------------------------------------------------------------------------------
-import Numeric
 import           Codec.Archive.Zip
+import Data.Maybe
 import           Control.Lens
-import qualified Data.Text.Lazy as TL
 import           Control.Monad
-import qualified Dhall
 import           Control.Monad.Catch
 import           Control.Monad.IO.Class
-import qualified Data.Aeson                 as Aeson
-import qualified Data.ByteString            as BS
-import qualified Data.ByteString.Lazy       as BL
+import qualified Data.Aeson                   as Aeson
+import qualified Data.ByteString              as BS
+import qualified Data.ByteString.Lazy         as BL
+import           Data.Digest.Pure.SHA
 import           Data.FileEmbed
-import           Data.List                  (find)
-import           Data.List.Split            (splitOn)
+import           Data.List                    (find)
+import           Data.List.Split              (splitOn)
 import           Data.Monoid
-import qualified Data.Text                  as T
-import qualified Data.Text.Encoding         as T
-import           Network.AWS                as A
-import           Network.AWS.CloudFormation as A
-import           Network.AWS.S3 as S3
-import           Network.AWS.Waiter         as A
-import           Stratosphere               as S
-import           System.Directory           (doesFileExist)
+import qualified Data.Text                    as T
+import qualified Data.Text.Encoding           as T
+import           Data.Time.Clock
+import           Data.Time.Format
+import qualified Data.Yaml                    as Yaml
+import           Network.AWS                  as A
+import           Network.AWS.CloudFormation   as A
+import qualified Data.HashMap.Strict as HM
+import           Network.AWS.Lambda.Invoke   as A
+import           Network.AWS.S3               as S3
+import           Network.AWS.Waiter           as A
+import           Numeric
+import qualified Stratosphere                 as S
+import           System.Directory             (doesFileExist)
 import           System.FilePath
-import Data.Bits
 import           System.Process
 --------------------------------------------------------------------------------
 import           Types
+import           Web.Serverless.Internal.Spec
+import           qualified Web.Serverless.Internal.Constants as C
 --------------------------------------------------------------------------------
 
 handlerJS :: HandlerJS
@@ -59,8 +65,8 @@ deploymentZipSize (DeploymentZip contents)
     in  T.pack $ showFFloat (Just 2) mbs " MB"
 
 saveDeploymentZip :: FilePath -> DeploymentZip -> M ()
-saveDeploymentZip fp (DeploymentZip contents) 
-  = liftIO $ BS.writeFile fp contents 
+saveDeploymentZip fp (DeploymentZip contents)
+  = liftIO $ BS.writeFile fp contents
 
 mkHsMain :: FilePath -> M HsMain
 mkHsMain fp = check >> (HsMain <$> liftIO (BS.readFile fp))
@@ -92,21 +98,15 @@ mkHsMain fp = check >> (HsMain <$> liftIO (BS.readFile fp))
 
 readConfig :: FilePath -> M Config
 readConfig path = do
-  liftIO (try $ Dhall.input Dhall.auto $ TL.pack path) >>= \case
-    Left ex -> throwM $ InvalidFile path (T.pack $ show (ex :: SomeException))
-    Right x -> return x
---  case ret of
---    
---  config' <- liftIO $ case takeExtension path of
---    ".json" -> Aeson.eitherDecodeStrict <$> rf
---    ".yml"  -> Yaml.decodeEither        <$> rf
---    ".yaml" -> Yaml.decodeEither        <$> rf
---    _       -> throwM $ InvalidFile
---                          path
---                          "Expected extensions: .json, .yaml or .yml"
---  case config' of
---    Left err  -> throwM $ InvalidFile path (T.pack err)
---    Right cfg -> return cfg
+  let rf = BS.readFile path
+  config' <- liftIO $ case takeExtension path of
+    ".json" -> Aeson.eitherDecodeStrict <$> rf
+    ".yml"  -> Yaml.decodeEither        <$> rf
+    ".yaml" -> Yaml.decodeEither        <$> rf
+    _       -> return $ Left "Expected extensions: .json, .yaml or .yml"
+  case config' of
+    Left err  -> throwM $ InvalidFile path (T.pack err)
+    Right cfg -> return cfg
 
 --------------------------------------------------------------------------------
 
@@ -135,13 +135,22 @@ awsLookupStack (AWSRes stackName) = do
     _     -> throwM $ AWSError "CloudFormation stack lookup failed."
                                "Unknown answer to DescribeStacks call."
 
-
-awsCreateStack :: AWSRes 'AWSStack 'AWSName -> Template -> M (AWSRes 'AWSStack 'AWSId)
-awsCreateStack (AWSRes stackName) tpl = do
+awsCreateStack :: AWSRes 'AWSStack 'AWSName
+               -> (AWSRes 'AWSBucket ty, T.Text)
+               -> S.Template
+               -> M (AWSRes 'AWSStack 'AWSId)
+awsCreateStack (AWSRes stackName) (AWSRes bucketName, path) tpl = do
   csrs <- send $ createStack stackName
-    & csTemplateBody ?~ (T.decodeUtf8 . BL.toStrict $ encodeTemplate tpl)
+    & csTemplateBody ?~ (T.decodeUtf8 . BL.toStrict $ S.encodeTemplate tpl)
     & csTags <>~ [serverlessHsTag]
     & csCapabilities <>~ [CapabilityIAM]
+    & csParameters <>~ [ parameter
+                           & pParameterKey ?~ C.parameterS3Bucket
+                           & pParameterValue ?~ bucketName
+                       , parameter
+                           & pParameterKey ?~ C.parameterS3Key
+                           & pParameterValue ?~ path
+                       ]
   unless (csrs ^. csrsResponseStatus == 200) $
     throwM $ AWSError "CloudFormation stack creation failed."
                       ("Status code: " <> T.pack (show $ csrs ^. csrsResponseStatus))
@@ -154,28 +163,24 @@ awsCreateStack (AWSRes stackName) tpl = do
   await stackCreateComplete (describeStacks & dStackName ?~ stackId) >>= \case
     AcceptSuccess -> return ()
     err           -> throwM $ AWSError "CloudFormation stack creation timed out."
-                                       ("Accept: " <> T.pack (show err))
+                                       (T.pack $ show err)
   return $ AWSRes stackId
 
-awsDescribeStack :: AWSRes 'AWSStack 'AWSId -> M AWSStackResult
-awsDescribeStack sid@(AWSRes stackId) = do
-  -- stack' <- send $ describeStacks & dStackName ?~ stackId
-  -- bucketId <- case stack' ^. dsrsStacks of
-  --   [st] -> case find (( == Just bucketIdOutputKey) . view oOutputKey)
-  --                     (st ^. sOutputs)
-  --                >>= view oOutputValue of
-  --     Just xs -> return $ AWSRes xs
-  --     Nothing -> throwM $ AWSError "CloudFormation stack creation failed."
-  --                                  "Created stack does not have a bucket."
-  --   _ -> throwM $ AWSError "CloudFormation stack creation failed."
-  --                          "Unknown answer from CloudFront." 
-  return $ AWSStackResult sid
-  
-
-awsUpdateStack :: AWSRes 'AWSStack 'AWSId -> Template -> M ()
-awsUpdateStack (AWSRes stackId) tpl = do
+awsUpdateStack :: AWSRes 'AWSStack 'AWSId
+               -> (AWSRes 'AWSBucket ty, T.Text)
+               -> S.Template
+               -> M ()
+awsUpdateStack (AWSRes stackId) (AWSRes bucketName, path) tpl = do
   usrs <- send $ updateStack stackId
-    & usTemplateBody ?~ (T.decodeUtf8 . BL.toStrict $ encodeTemplate tpl)
+    & usTemplateBody ?~ (T.decodeUtf8 . BL.toStrict $ S.encodeTemplate tpl)
+    & usParameters <>~ [ parameter
+                           & pParameterKey ?~ C.parameterS3Bucket
+                           & pParameterValue ?~ bucketName
+                       , parameter
+                           & pParameterKey ?~ C.parameterS3Key
+                           & pParameterValue ?~ path
+                       ]
+    & usCapabilities <>~ [CapabilityIAM]
   unless (usrs ^. usrsResponseStatus == 200) $
     throwM $ AWSError "CloudFormation stack update failed."
                       ("Status code: " <> T.pack (show $ usrs ^. usrsResponseStatus))
@@ -185,57 +190,72 @@ awsUpdateStack (AWSRes stackId) tpl = do
     err           -> throwM $ AWSError "CloudFormation stack update timed out."
                                        ("Accept: " <> T.pack (show err))
 
-awsUploadArchive :: AWSRes 'AWSBucket ty -> DeploymentZip -> M ()
-awsUploadArchive (AWSRes bucketId) (DeploymentZip contents) = do
+awsDescribeStack :: AWSRes 'AWSStack 'AWSId -> M AWSStackResult
+awsDescribeStack (AWSRes stackId) = do
+  dsrsrs <- send $ describeStackResources & dsrStackName ?~ stackId
+  unless (dsrsrs ^. dsrsrsResponseStatus == 200) $
+    throwM $ AWSError "CloudFormation describeStack failed."
+                      ("Status code: " <> T.pack (show $ dsrsrs ^. dsrsrsResponseStatus))
+  let resources = mapMaybe
+        (\s -> (,) (s^.srLogicalResourceId) <$> s^.srPhysicalResourceId)
+        (dsrsrs ^. dsrsrsStackResources)
+
+  return $ AWSStackResult (AWSRes stackId) resources
+
+awsUploadObject :: AWSRes 'AWSBucket ty -> T.Text -> BS.ByteString -> M ()
+awsUploadObject (AWSRes bucketId) path contents = do
   pors <- send $ putObject
                    (BucketName bucketId)
-                   (ObjectKey "deployment.zip")
+                   (ObjectKey path)
                    (toBody contents)
   unless (pors ^. porsResponseStatus == 200) $
     throwM $ AWSError "Upload failed."
-                      ("Status code: " <> T.pack (show $ pors ^. porsResponseStatus))  
-    
+                      ("Status code: " <> T.pack (show $ pors ^. porsResponseStatus))
+
   return ()
+
+awsInvokeFunction :: AWSRes 'AWSLambdaFunction 'AWSId -> Aeson.Object -> M Aeson.Object
+awsInvokeFunction (AWSRes functionId) payload = do
+  irs <- send $ invoke functionId payload
+  unless (irs ^. irsStatusCode == 200) $
+    throwM $ AWSError "Failed to invoke lambda function."
+                      ("Status code: " <> T.pack (show $ irs ^. irsStatusCode))
+
   
+  case irs ^. irsPayload of
+    Nothing ->  throwM $ AWSError "Failed to get answer from lambda function."
+                                 ("Status code: " <> T.pack (show $ irs ^. irsStatusCode))
+    Just x -> return x
+
+  
+
+mkArchiveName :: AWSRes 'AWSStack 'AWSName -> UTCTime -> DeploymentZip -> T.Text
+mkArchiveName (AWSRes stackName) date' (DeploymentZip contents)
+  = let hash = sha1 $ BL.fromStrict contents
+        date = formatTime defaultTimeLocale (iso8601DateFormat Nothing) date'
+    in T.intercalate "-"
+         ["serverless-hs", stackName, T.pack date, T.pack $ showDigest hash]
+         <> ".zip"
+
 --------------------------------------------------------------------------------
 
-myRole :: IAMRole
-myRole = iamRole
-  [ ( "Version"
-    , "2012-10-17"
-    )
-  , ( "Statement"
-    , object [ ( "Effect", "Allow")
-             , ( "Principal"
-               , object [ ( "Service"
-                          , array [ "lambda.amazonaws.com" ]
-                          )
-                        ]
-               )
-             , ( "Action"
-               , array [ "sts:AssumeRole" ]
-               )
-             ]
-    )
+initialTemplate :: S.Template
+initialTemplate = S.template
+  [ S.resource "role" defaultRole
+  , S.resource "meta" $ S.LambdaFunctionProperties
+      $ S.lambdaFunction
+      ( S.lambdaFunctionCode
+        & S.lfcS3Bucket ?~ S.Ref C.parameterS3Bucket
+        & S.lfcS3Key    ?~ S.Ref C.parameterS3Key
+      )
+      "index.handler"
+      (S.GetAtt "role" "Arn")
+      (S.Literal S.NodeJS43)
+      & S.lfTimeout ?~ S.Literal 10
+      & S.lfEnvironment ?~ S.LambdaFunctionEnvironment
+          (Just $ HM.fromList [(C.envFunctionId, "meta")])
   ]
-  where
-    object = Aeson.object
-    array  = Aeson.Array
+  & S.parameters ?~ [ S.parameter C.parameterS3Bucket "String"
+                    , S.parameter C.parameterS3Key "String"
+                    ]
 
-
-initialTemplate :: AWSRes 'AWSBucket ty -> Template
-initialTemplate (AWSRes bucketName)
-  = template
-     [ resource "role"   $ IAMRoleProperties myRole
-     , ( resource "lambda" . LambdaFunctionProperties
-         $ lambdaFunction
-             ( lambdaFunctionCode
-               & lfcS3Bucket ?~  (S.Literal bucketName)
-               & lfcS3Key    ?~  (S.Literal "deployment.zip")
-             )
-             "handler.handler"
-             (GetAtt "role" "Arn")
-             (Literal NodeJS43)
-             & lfTimeout ?~ (S.Literal 10)
-       ) & dependsOn ?~ [ "role" ]
-     ]

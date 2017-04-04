@@ -1,0 +1,67 @@
+name: serverless-hs
+version: 0.0.1
+maintainer: Utku Demir <utdemir@gmail.com>
+license: BSD3
+github: utdemir/serverless-hs
+category: Web
+
+ghc-options: -Wall
+
+library:
+  source-dirs: src
+  dependencies:
+    - base >= 4.7 && < 5
+    - aeson
+    - aeson-casing
+    - async
+    - attoparsec
+    - bytestring
+    - containers
+    - deepseq
+    - http-types
+    - lens
+    - mtl
+    - operational
+    - optparse-generic
+    - safe-exceptions
+    - stratosphere
+    - text
+    - network
+    - network-simple
+    - unordered-containers
+
+executables:
+  serverless-hs:
+    main: Main.hs
+    source-dirs: app
+    dependencies:
+      - base >= 4.7 && < 5
+      - aeson
+      - aeson-casing
+      - amazonka
+      - amazonka-cloudformation
+      - amazonka-core
+      - amazonka-s3
+      - amazonka-lambda
+      - ansi-terminal
+      - bytestring
+      - directory
+      - exceptions
+      - file-embed
+      - filepath
+      - lens
+      - optparse-generic
+      - process
+      - resourcet
+      - safe-exceptions
+      - serverless-hs
+      - split
+      - stratosphere
+      - system-filepath
+      - text
+      - transformers
+      - yaml
+      - zip-archive
+      - SHA
+      - time
+      - unordered-containers

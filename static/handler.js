@@ -4,6 +4,7 @@
 
 const spawn = require("child_process").spawn;
 const http = require("http");
+const net = require("net")
 
 /******************************************************************************/
 
@@ -21,28 +22,22 @@ function spawnBackend(port/*: number*/, succ/*: () => void*/, err/*: string => v
       proc.kill()
       err("Timeout when spawning child")
     } else {
-      const req = http.request({
+      const sock = new net.Socket()
+      sock.connect({
         host: "127.0.0.1",
-        port: port,
-        path: "/status",
-        method: "GET",
-        timeout: 500,
-      });
-      req.on("error", msg => {
+        port: port        
+      })
+      
+      sock.on("error", msg => {
         console.log(`Tried to connect to backend, but got: ${msg}, retrying...`);
         setTimeout(wait, 100)
       });
-      req.on("response", res => {
-        const code = res.statusCode;
-        if(code != 200) {
-          console.log(`Tried to connect to backend, but got http code: ${code}, retrying...`)
-          setTimeout(wait, 100)
-        } else {
-          console.log(`Backend is up.`)
-          succ()
-        }
+      
+      sock.on("connect", res => {
+        console.log(`Backend is up.`)
+        sock.end()
+        succ()
       });
-      req.end()
     }
   }
 
@@ -115,35 +110,43 @@ exports.handler = function(event/*: Object */, context/*: Object*/
     if(error != null)
       callback(error)
     else {
-      const req = http.request({
+      const sock = new net.Socket()
+      sock.connect({
         host: "127.0.0.1",
-        port: port,
-        path: "/function",
-        method: "POST",
-        timeout: 500,
-      });
-      req.write(JSON.stringify(payload))
-      req.on("response", response => {
-        var res = "";
-        response.on("data", chunk => {
-          res += chunk
-        })
-        response.on("end", ret => {
-          const parsed = jsonToAnswer(res)
-          if(parsed == null) {
-            callback("Error decoding json", null)
-          } else {
-            if(parsed.tag == "Success") {
-              callback(null, parsed.contents)
-            } else if(parsed.tag == "Failure") {
-              callback(parsed.contents)
-            } else {
-              callback(parsed)
-            }            
-          }
-        })
+        port: port        
       })
-      req.end()
+      
+      sock.on("error", msg => {
+        callback(msg)
+      });
+
+      var res = "";
+      sock.on("data", chunk => {
+        res += chunk
+      });
+
+      sock.on("connect", () => {
+        sock.write(JSON.stringify(payload))
+      })
+
+      sock.on("error", msg => {
+        callback(msg, null)
+      });
+      
+      sock.on("end", ret => {
+        const parsed = jsonToAnswer(res)
+        if(parsed == null) {
+          callback("Error decoding json", null)
+        } else {
+          if(parsed.tag == "Success") {
+            callback(null, parsed.contents)
+          } else if(parsed.tag == "Failure") {
+            callback(parsed.contents)
+          } else {
+            callback(parsed)
+          }            
+        }
+      })
     }
   })
 };

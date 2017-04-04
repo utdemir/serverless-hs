@@ -1,19 +1,6 @@
-resolver: nightly-2017-01-17
+resolver: lts-8.5
 
 packages:
-- '.'
-- examples/
-- location:
-    git: git@github.com:Gabriel439/Haskell-Dhall-Library
-    commit: 4dd7c68870e20f99c43786ab2fb1611982f90119
-
-flags: {}
-
-allow-newer: true
+  - '.'
 
 install-ghc: true
-docker:
-  enable: false
-#  image: "lambci/lambda:build"
-  image: "fpco/stack-build:latest"
-  set-user: false

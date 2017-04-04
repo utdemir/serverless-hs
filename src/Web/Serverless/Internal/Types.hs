@@ -1,27 +1,22 @@
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE DeriveFunctor     #-}
 {-# LANGUAGE DeriveGeneric     #-}
 {-# LANGUAGE FlexibleContexts  #-}
-{-# LANGUAGE GADTs             #-}
-{-# LANGUAGE OverloadedStrings #-}
 
-module Web.Serverless.Types
-  ( module Web.Serverless.Types
-  , module Web.Serverless.Types.Args
+module Web.Serverless.Internal.Types
+  ( module Web.Serverless.Internal.Types
+  , module Web.Serverless.Internal.Types.Args
   )
   where
 
 --------------------------------------------------------------------------------
-import           Control.DeepSeq           (NFData)
-import           Control.Exception.Safe
 import           Data.Aeson
 import           Data.Aeson.Casing
 import           Data.Aeson.TH
-import           Data.Monoid
-import           Data.Text                 (Text)
-import qualified Data.Text                 as T
 import           GHC.Generics
 --------------------------------------------------------------------------------
-import           Web.Serverless.Types.Args
+import           Web.Serverless.Internal.Types.Args
 --------------------------------------------------------------------------------
 
 aesonSettings :: Options
@@ -47,11 +42,7 @@ instance FromJSON a => FromJSON (Event a) where
 
 --------------------------------------------------------------------------------
 
-data LambdaFunction payload err m ret where
-  LambdaFunction :: ( FromJSON (Event payload), ToJSON ret, ToJSON err
-                    , NFData ret, NFData err
-                    )
-                 => (Event payload -> m (Either err ret))
-                 -> LambdaFunction payload err m ret
-
-
+data LambdaFunction payload err ret where
+  LambdaFunction :: (FromJSON payload, ToJSON ret, ToJSON err)
+                 => (Event payload -> IO (Either err ret))
+                 -> LambdaFunction payload err ret

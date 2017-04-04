@@ -3,12 +3,13 @@
 {-# LANGUAGE TypeOperators #-}
 {-# OPTIONS_GHC -fno-warn-unused-binds #-}
 
-module Web.Serverless.Types.Args
+module Web.Serverless.Internal.Types.Args
   ( Args (..)
   ) where
 
 --------------------------------------------------------------------------------
 import           Options.Generic
+import Data.Text (Text)
 --------------------------------------------------------------------------------
 
 data CLI
@@ -28,6 +29,6 @@ instance ParseRecord Args where
   parseRecord = toArgs <$> parseRecord
     where
       toArgs :: CLI -> Args
-      toArgs (CLI (Helpful i))
-        = Args i
+      toArgs (CLI (Helpful i)) = Args i
+
 
